@@ -76,7 +76,7 @@ fn save_mode(path: &Path, mode: &str) -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "config has no parent"))?;
     std::fs::create_dir_all(parent)?;
-    let temp = parent.join("config.json.tmp");
+    let temp = parent.join(format!("config.json.{}.tmp", std::process::id()));
     let mut file = std::fs::File::create(&temp)?;
     serde_json::to_writer_pretty(&mut file, &config)?;
     file.write_all(b"\n")?;
@@ -111,11 +111,21 @@ fn is_other_level_row(line: &str, mode: &str) -> bool {
         .any(|level| level != &mode && line.starts_with(&format!("| **{level}** |")))
 }
 
-fn instructions(mode: &str) -> String {
-    let body = SKILL
+/// Drops the YAML front matter, also when the file was checked out with CRLF
+/// (include_str! embeds whatever bytes git delivered).
+fn front_matter_body(skill: &str) -> String {
+    let text = skill.replace("\r\n", "\n");
+    match text
         .strip_prefix("---\n")
-        .and_then(|s| s.split_once("---\n").map(|(_, body)| body))
-        .unwrap_or(SKILL);
+        .and_then(|rest| rest.split_once("\n---\n"))
+    {
+        Some((_, body)) => body.to_owned(),
+        None => text,
+    }
+}
+
+fn instructions(mode: &str) -> String {
+    let body = front_matter_body(SKILL);
     let body = body
         .lines()
         .filter(|line| !is_other_level_row(line, mode))
@@ -209,6 +219,16 @@ mod tests {
         );
         assert!(command("review", "full", "full").0.is_none());
         assert!(command("status", "full", "lite").1.contains("current full"));
+        assert!(command("", "full", "full").1.contains("current full"));
+    }
+
+    #[test]
+    fn strips_front_matter_with_lf_and_crlf() {
+        let lf = "---\nname: ponytail\n---\n\nBODY";
+        assert_eq!(front_matter_body(lf), "\nBODY");
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(front_matter_body(&crlf), "\nBODY");
+        assert_eq!(front_matter_body("BODY"), "BODY");
     }
 
     #[test]
@@ -232,7 +252,10 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["defaultMode"], "ultra");
         assert_eq!(saved["quietStartup"], true);
-        assert!(!dir.join("ponytail/config.json.tmp").exists());
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

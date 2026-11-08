@@ -103,7 +103,8 @@ rm -rf .rpi/skills/ponytail-{review,audit,debt,gain,help}
 `/ponytail <level>` 成功切换后会立即写回配置文件：
 
 - 只更新 `defaultMode`，**文件里的其他字段原样保留**。
-- 先写同目录的 `config.json.tmp` 并 `fsync`，再原子 `rename` 覆盖，写入中断不会留下半个文件。
+- 先写同目录的 `config.json.<pid>.tmp` 并 `fsync`，再原子 `rename` 覆盖，写入中断不会留下半个文件；
+  临时名带进程号，两个 rpi 进程同时切换时不会互相覆盖对方的临时文件。
   替换后的文件按进程 umask 重新创建，不会继承原文件的权限位（需要严格控制权限时用 `umask` 或 ACL）。
 - 配置文件不是合法 JSON 对象、目录不可写等情况：打印错误，**当前模式保持不变**，配置文件也不被改写。
 
