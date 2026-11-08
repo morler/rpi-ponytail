@@ -1,0 +1,13 @@
+[package]
+name = "rpi-ponytail"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Ponytail coding instructions for rpi"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rpi-plugin-sdk = "=0.8.5"
+serde_json = "1"
