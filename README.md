@@ -165,4 +165,7 @@ skills/          随包分发的原版专项技能
 
 ## 许可
 
-原版规则与技能依据 MIT 协议复制，原版权归 Dietrich Gebert 所有，完整声明见 [LICENSE](LICENSE)。
+本项目使用 MIT 协议，完整声明见 [LICENSE](LICENSE)。
+
+规则正文与 skills/ 下的技能来自 [Ponytail](https://github.com/DietrichGebert/ponytail)，
+依 MIT 协议复制，原版权归 Dietrich Gebert 所有；插件封装部分版权归 msc802。

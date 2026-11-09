@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Ponytail coding instructions for rpi"
+repository = "https://github.com/morler/rpi-ponytail"
+homepage = "https://github.com/morler/rpi-ponytail"
+readme = "README.md"
+keywords = ["rpi", "plugin", "ponytail", "prompt"]
+categories = ["development-tools"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
