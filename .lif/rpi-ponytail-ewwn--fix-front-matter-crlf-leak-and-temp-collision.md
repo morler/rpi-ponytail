@@ -1,11 +1,11 @@
 ---
 # rpi-ponytail-ewwn
-title: 修复 front matter CRLF 泄漏与配置临时文件冲突
+title: Fix front matter CRLF leak and temp collision
 status: completed
 type: bug
 priority: normal
 created_at: 2026-11-08T01:43:28Z
-updated_at: 2026-11-08T01:43:30Z
+updated_at: 2026-11-09T03:35:01Z
 ---
 
 审查发现两处：
