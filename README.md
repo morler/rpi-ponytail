@@ -163,10 +163,22 @@ rm -rf .rpi/skills/ponytail-{review,audit,debt,gain,help}
 ## 开发
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+lif run check      # cargo test + fmt --check + clippy -D warnings
 ```
+
+发版只需一条命令（版本号以 `Cargo.toml` 为唯一来源，CI 自己从里面读）：
+
+```sh
+lif run release 0.1.2
+```
+
+它依次改 `Cargo.toml` / README 里的版本、刷新 `Cargo.lock`、跑 `lif run check`、提交推送、
+打 `rpi-ponytail-v0.1.2` 标签并推送，之后由 GitHub Actions 构建五平台包、真实 host smoke、
+最后发布 manifest。CI 失败时用 `lif run release-reset 0.1.2` 清掉 tag 和 draft release 再重试，
+不要在同一个 tag 上重跑（draft 会残留上一次的资产）。
+
+改版本号后不能直接 `cargo build --locked`：锁文件里的 crate 版本会变，必须先用 `--offline`
+让 Cargo 更新它，这也是 `bump` 任务里那一步用 `--offline` 的原因。
 
 调试时在仓库内运行 `rpi dev`（源码变更自动重编译并热重载）或 `rpi dev-local`（隔离模式，只加载本插件）。
 

@@ -31,3 +31,50 @@ agent:
 server:
     # Port for the web UI (used by `lif-serve`)
     port: 8080
+
+# Release flow. The version in Cargo.toml is the only source of truth: the CI
+# workflow reads it back to name the tag and the archives.
+tasks:
+    check:
+        desc: Test, format and lint the crate
+        steps:
+            - cargo test --locked
+            - cargo fmt --check
+            - cargo clippy --all-targets --locked -- -D warnings
+
+    bump:
+        desc: Set the version in Cargo.toml and README, then refresh Cargo.lock
+        args: [version]
+        steps:
+            - 'case "$version" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "expected X.Y.Z, got $version" >&2; exit 1;; esac'
+            # --locked refuses to update the lock file when the crate version changes.
+            # Replace the first `version = "..."` line only: that is [package].version.
+            - "sed -i '0,/^version = \".*\"$/s//version = \"'\"$version\"'\"/' Cargo.toml"
+            - "sed -i 's|--version [0-9]*\\.[0-9]*\\.[0-9]*|--version '\"$version\"'|' README.md"
+            - cargo build --release --offline
+            - grep -q "^version = \"$version\"$" Cargo.toml
+            - grep -A1 'name = "rpi-ponytail"' Cargo.lock | grep -q "^version = \"$version\"$"
+
+    release:
+        desc: Bump, verify, and tag a release that CI will publish
+        args: [version]
+        deps: []
+        steps:
+            - '"$LIF" run bump "$version"'
+            - '"$LIF" run check'
+            - git add -A
+            - "git commit -m \"Release $version\""
+            - git push origin HEAD
+            - git tag -a "rpi-ponytail-v$version" -m "rpi-ponytail $version"
+            - git push origin "rpi-ponytail-v$version"
+            - 'echo "pushed rpi-ponytail-v$version; watch it with: gh run watch"'
+
+    release-reset:
+        desc: Drop a failed release and its tag so the same version can be retried
+        args: [version]
+        steps:
+            # A push-triggered run cannot be replayed on the same tag: the draft
+            # release keeps whatever assets the failed attempt uploaded.
+            - gh release delete "rpi-ponytail-v$version" --yes --cleanup-tag --repo morler/rpi-ponytail || true
+            - git push origin ":refs/tags/rpi-ponytail-v$version" || true
+            - git tag -d "rpi-ponytail-v$version" || true
