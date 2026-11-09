@@ -62,16 +62,16 @@ dependencies = [
 
 [[package]]
 name = "rpi-plugin-sdk"
-version = "0.8.5"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b2ffd5f670dbc15d5a2ae7a4991afe8cde55fdac8ded2c05bde841d08ff5981"
+checksum = "b1da91861977502e3151dfa66cb4d58c385e5659e483cee844a0ba690dd15248"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "rpi-ponytail"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rpi-plugin-sdk",
  "serde_json",

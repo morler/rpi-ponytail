@@ -15,7 +15,27 @@ Ponytail 本身只是一段提示词：先读懂任务和它触及的代码，�
 
 ## 安装
 
-需要已构建好的 rpi（`rpi --version` 可用）与 Rust 工具链（`rpi package link` 会调用 Cargo）。
+### 预编译包（推荐）
+
+要求 rpi 0.21.1+。从 GitHub Release 下载，不经 crates.io，所以必须带 `--github`：
+
+```sh
+rpi install rpi-ponytail --github morler/rpi-ponytail --version 0.1.1
+```
+
+支持 `x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、`x86_64-pc-windows-msvc`、
+`x86_64-apple-darwin`、`aarch64-apple-darwin`（musl 不支持，插件机制依赖 `dlopen`）。
+
+专项技能不在预编译包里（`rpi install` 只装库文件），仍要手动复制一次：
+
+```sh
+mkdir -p .rpi/skills
+cp -R /path/to/rpi-ponytail/skills/ponytail-* .rpi/skills/
+```
+
+### 从源码
+
+需要 Rust 工具链（`rpi package link` 会调用 Cargo）。
 
 在**目标项目**目录执行（把路径换成本仓库的实际位置）：
 
@@ -40,7 +60,8 @@ printf '{"id":"1","type":"get_commands"}\n' | rpi --mode rpc --offline --approve
 ### 卸载
 
 ```sh
-rpi package unlink rpi-ponytail
+rpi uninstall rpi-ponytail          # 预编译安装
+rpi package unlink rpi-ponytail     # 源码 link 安装
 rm -rf .rpi/skills/ponytail-{review,audit,debt,gain,help}
 ```
 

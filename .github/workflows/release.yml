@@ -1,0 +1,162 @@
+name: release
+
+on:
+  push:
+    tags: ["rpi-ponytail-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RPI_REPO: bigfish1913/pi-rust
+  RPI_TAG: v0.21.1
+
+jobs:
+  release:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04,     target: x86_64-unknown-linux-gnu }
+          - { runner: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { runner: windows-2022,     target: x86_64-pc-windows-msvc }
+          - { runner: macos-15-intel,   target: x86_64-apple-darwin }
+          - { runner: macos-latest,     target: aarch64-apple-darwin }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Read version and tag
+        id: meta
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=rpi-ponytail-v$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Test and build
+        run: |
+          cargo test --locked
+          cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage archive
+        run: bash scripts/pack.sh ${{ matrix.target }} ${{ steps.meta.outputs.version }}
+
+      - name: Upload archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          # Five runners race to create the same release; a 422 from losing the race is
+          # fine as long as the release ends up existing.
+          # Draft until the manifest job publishes it: a failed smoke or manifest must never
+          # leave a release users can install from.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "$TAG" --notes "rpi-ponytail ${{ steps.meta.outputs.version }}" \
+            || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$TAG" dist/*.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
+
+  smoke:
+    needs: release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     target: x86_64-unknown-linux-gnu, host: tar.gz }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, host: tar.gz }
+          - { runner: windows-2022,     target: x86_64-pc-windows-msvc, host: zip }
+          - { runner: macos-15-intel,   target: x86_64-apple-darwin, host: tar.gz }
+          - { runner: macos-latest,     target: aarch64-apple-darwin, host: tar.gz }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the rpi host
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # ubuntu-24.04: the published rpi needs GLIBC_2.39.
+          mkdir -p "$RUNNER_TEMP/host"
+          gh release download "$RPI_TAG" --repo "$RPI_REPO" --pattern "rpi-$RPI_TAG-${{ matrix.target }}.${{ matrix.host }}" --dir "$RUNNER_TEMP/host" --clobber
+          cd "$RUNNER_TEMP/host"
+          if [ "${{ matrix.host }}" = zip ]; then unzip -oq *.zip; else tar -xzf *.tar.gz; fi
+          echo "$RUNNER_TEMP/host" >> "$GITHUB_PATH"
+
+      - name: Load the published library in the real host
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A dummy key is enough: the smoke only needs the host to boot, not to call a model.
+          OPENAI_API_KEY: sk-smoke
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          tag="rpi-ponytail-v$version"
+          ext_dir="$HOME/.rpi/agent/extensions"
+          mkdir -p "$ext_dir" "$RUNNER_TEMP/pkg"
+          # Smoke the bytes users get, before the manifest exists: load the archive's library directly.
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "rpi-ponytail-$version-${{ matrix.target }}.*" --dir "$RUNNER_TEMP/pkg" --clobber
+          cd "$RUNNER_TEMP/pkg"
+          tar -xzf *.tar.gz
+          cp ./*.so ./*.dylib ./*.dll "$ext_dir/" 2>/dev/null || true
+          ls "$ext_dir"
+          rpi --version
+          printf '{"id":"1","type":"execute_command","command":"ponytail","args":"status"}\n' > cmd.jsonl
+          rpi --mode rpc --approve < cmd.jsonl 2>&1 | tee smoke.log
+          grep -q 'Ponytail: current' smoke.log
+
+  manifest:
+    needs: smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read version and tag
+        id: meta
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          sdk="$(grep -A1 'name = "rpi-plugin-sdk"' Cargo.lock | sed -nE 's/^version = "(.*)"/\1/p')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sdk=$sdk" >> "$GITHUB_OUTPUT"
+          echo "tag=rpi-ponytail-v$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Download published archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          mkdir -p staged
+          # Draft or not, /releases/tags/ is unreliable here, so find the release in the list
+          # and pull each asset through the API by id.
+          rid="$(gh api 'repos/'"$GITHUB_REPOSITORY"'/releases?per_page=100' --jq '.[] | select(.tag_name == "'"$TAG"'") | .id')"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$rid" --jq '.assets[] | select(.name | endswith(".tar.gz")) | "\(.id) \(.name)"' \
+            | while read -r id f; do gh api "repos/$GITHUB_REPOSITORY/releases/assets/$id" -H 'Accept: application/octet-stream' > "staged/$f"; done
+          ls -l staged
+
+      - name: Build and check manifest
+        run: |
+          python3 scripts/manifest.py staged "${{ steps.meta.outputs.version }}" "https://github.com/$GITHUB_REPOSITORY" "${{ steps.meta.outputs.tag }}" "${{ steps.meta.outputs.commit }}" "${{ steps.meta.outputs.sdk }}" 4
+          python3 scripts/check_manifest.py staged/rpi-extension.json
+
+      - name: Upload manifest last
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          gh release upload "$TAG" staged/rpi-extension.json --repo "$GITHUB_REPOSITORY" --clobber
+          # Publish only now: archives and manifest verified, and the manifest is the last asset.
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
